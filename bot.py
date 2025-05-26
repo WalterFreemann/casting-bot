@@ -9,8 +9,6 @@ phone = os.getenv('PHONE')  # можно не указывать, если се�
 bot_token = os.getenv('BOT_TOKEN')
 chat_id = os.getenv('CHAT_ID')  # сюда пиши, куда слать сообщения от бота
 
-session_name = os.getenv('SESSION_NAME', 'casting_session')
-
 channels = os.getenv('CHANNELS', '')
 keywords = os.getenv('KEYWORDS', '')
 
@@ -18,7 +16,15 @@ keywords = os.getenv('KEYWORDS', '')
 channels_list = [ch.strip() for ch in channels.split(',') if ch.strip()]
 keywords_list = [kw.strip().lower() for kw in keywords.split(',') if kw.strip()]
 
-client = TelegramClient(session_name, api_id, api_hash)
+# Определяем путь к сессионному файлу
+session_env_path = '/etc/secrets/session.session'
+
+if os.path.exists(session_env_path):
+    session_path = session_env_path
+else:
+    session_path = f"{os.getenv('SESSION_NAME', 'casting_session')}.session"
+
+client = TelegramClient(session_path, api_id, api_hash)
 
 async def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
