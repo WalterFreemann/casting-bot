@@ -2,13 +2,12 @@ from telethon import TelegramClient, events
 import asyncio
 import aiohttp
 import os
-import boto3
-from botocore.client import Config
+import requests
 
 # === Загрузка переменных окружения ===
 api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
-phone = os.getenv('PHONE')  # можно не указывать, если сессия есть
+phone = os.getenv('PHONE')  # Можно не указывать, если есть session
 bot_token = os.getenv('BOT_TOKEN')
 chat_id = os.getenv('CHAT_ID')  # ID или username чата для уведомлений
 
@@ -22,25 +21,22 @@ keywords_list = [kw.strip().lower() for kw in keywords.split(',') if kw.strip()]
 # === Путь к локальному сессионному файлу ===
 session_local_path = 'session.session'
 
-# === Загрузка сессии из B2 через S3, если файл не существует ===
+# === Загрузка .session через HTTP (Backblaze URL из переменной окружения) ===
+session_file_url = os.getenv('SESSION_FILE_URL')
+
 if not os.path.exists(session_local_path):
-    print("Сессионный файл не найден локально. Скачиваем из B2...")
+    print("Сессионный файл не найден локально. Скачиваем...")
 
-    s3 = boto3.client(
-        's3',
-        aws_access_key_id=os.getenv('S3_KEY_ID'),
-        aws_secret_access_key=os.getenv('S3_APPLICATION_KEY'),
-        endpoint_url=os.getenv('S3_ENDPOINT'),
-        config=Config(signature_version='s3v4')
-    )
+    if not session_file_url:
+        raise ValueError("Не задана переменная окружения SESSION_FILE_URL")
 
-    s3.download_fileobj(
-        os.getenv('S3_BUCKET_NAME'),
-        os.getenv('S3_SESSION_FILE'),
-        open(session_local_path, 'wb')
-    )
-
-    print("Сессия успешно загружена.")
+    response = requests.get(session_file_url)
+    if response.status_code == 200:
+        with open(session_local_path, 'wb') as f:
+            f.write(response.content)
+        print("Сессия успешно загружена.")
+    else:
+        raise RuntimeError(f"Не удалось скачать файл: {response.status_code} - {response.text}")
 else:
     print("Сессия найдена локально. Используем её.")
 
