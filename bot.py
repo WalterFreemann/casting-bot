@@ -10,6 +10,7 @@ api_hash = os.getenv('API_HASH')
 phone = os.getenv('PHONE')  # Можно не указывать, если есть session
 bot_token = os.getenv('BOT_TOKEN')
 chat_id = os.getenv('CHAT_ID')  # ID или username чата для уведомлений
+session_file_url = os.getenv('SESSION_FILE_URL')
 
 channels = os.getenv('CHANNELS', '')
 keywords = os.getenv('KEYWORDS', '')
@@ -21,9 +22,7 @@ keywords_list = [kw.strip().lower() for kw in keywords.split(',') if kw.strip()]
 # === Путь к локальному сессионному файлу ===
 session_local_path = 'session.session'
 
-# === Загрузка .session через HTTP (Backblaze URL из переменной окружения) ===
-session_file_url = os.getenv('SESSION_FILE_URL')
-
+# === Загрузка .session через HTTP, если файла нет ===
 if not os.path.exists(session_local_path):
     print("Сессионный файл не найден локально. Скачиваем...")
 
