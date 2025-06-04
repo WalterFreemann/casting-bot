@@ -3,6 +3,15 @@ import asyncio
 import aiohttp
 import os
 import requests
+from flask import Flask
+from threading import Thread
+
+# === Flask-приложение для Render ===
+app = Flask(__name__)
+
+@app.route("/")
+def index():
+    return "Кастинг-бот жив. Бдит кастинги. Не мешай."
 
 # === Загрузка переменных окружения ===
 api_id = int(os.getenv('API_ID'))
@@ -28,7 +37,6 @@ session_local_path = session_file_name
 def download_session_from_b2():
     print("Сессионный файл не найден локально. Пытаемся скачать из B2...")
 
-    # Получаем авторизационный токен B2
     auth = requests.get(
         "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
         auth=(b2_key_id, b2_app_key)
@@ -38,11 +46,9 @@ def download_session_from_b2():
         raise RuntimeError(f"Ошибка авторизации B2: {auth.status_code} - {auth.text}")
 
     auth_data = auth.json()
-    api_url = auth_data['apiUrl']
     download_url = auth_data['downloadUrl']
     auth_token = auth_data['authorizationToken']
 
-    # Получаем файл
     file_url = f"{download_url}/file/{bucket_name}/{session_file_name}"
     headers = {"Authorization": auth_token}
     response = requests.get(file_url, headers=headers)
@@ -84,12 +90,16 @@ async def handler(event):
         print(info)
         await send_telegram_message(info)
 
-# === Основной цикл ===
-async def main():
-    await client.start(phone=phone)
-    print("Бот запущен и слушает сообщения...")
-    await client.run_until_disconnected()
+# === Запуск бота в отдельном потоке ===
+def start_bot():
+    async def main():
+        await client.start(phone=phone)
+        print("Бот запущен и слушает сообщения...")
+        await client.run_until_disconnected()
 
-# === Запуск ===
-if __name__ == '__main__':
     asyncio.run(main())
+
+if __name__ == '__main__':
+    Thread(target=start_bot).start()
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
