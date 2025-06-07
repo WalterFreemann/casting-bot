@@ -1,13 +1,13 @@
 import re
-from telethon import TelegramClient, events
-import asyncio
-import aiohttp
 import os
 import requests
-from flask import Flask
+import aiohttp
+import asyncio
 from threading import Thread
+from flask import Flask
+from telethon import TelegramClient, events
 
-# === Flask-приложение для Render ===
+# === Flask-приложение ===
 app = Flask(__name__)
 
 @app.route("/")
@@ -30,7 +30,7 @@ channels = os.getenv('CHANNELS', '')
 channels_list = [ch.strip() for ch in channels.split(',') if ch.strip()]
 session_local_path = session_file_name
 
-# === Загрузка .session из приватного Backblaze B2 ===
+# === Загрузка .session из B2 (если нет локально) ===
 def download_session_from_b2():
     print("Сессионный файл не найден локально. Пытаемся скачать из B2...")
 
@@ -57,7 +57,6 @@ def download_session_from_b2():
     else:
         raise RuntimeError(f"Не удалось скачать файл из B2: {response.status_code} - {response.text}")
 
-# === Проверка наличия сессионного файла ===
 if not os.path.exists(session_local_path):
     download_session_from_b2()
 else:
@@ -66,7 +65,7 @@ else:
 # === Инициализация Telegram клиента ===
 client = TelegramClient(session_local_path, api_id, api_hash)
 
-# === Функция проверки релевантности сообщения ===
+# === Проверка релевантности сообщения ===
 def is_relevant_message(text):
     age_patterns = [
         r'\b(?:3[0-9]|4[0-9]|50)[\s\-–~]{0,3}лет',
@@ -114,21 +113,22 @@ async def check_channels():
         except Exception as e:
             print(f"❌ Ошибка при подключении к {ch}: {e}")
 
-# === Запуск бота в отдельном потоке ===
-def start_bot():
-    async def main():
-        await client.start(phone=phone)
-        print("Бот запущен и слушает сообщения...")
-
-        # 👇 Проверка подключений к каналам
-        await check_channels()
-
-        await client.run_until_disconnected()
-
-    asyncio.run(main())
-
-# === Стартуем ===
-if __name__ == '__main__':
-    Thread(target=start_bot).start()
+# === Функция для запуска Flask в отдельном потоке ===
+def run_flask():
     port = int(os.getenv('PORT', 5000))
     app.run(host='0.0.0.0', port=port)
+
+# === Основная async функция запуска бота ===
+async def main():
+    await client.start(phone=phone)
+    print("Бот запущен и слушает сообщения...")
+    await check_channels()
+    await client.run_until_disconnected()
+
+if __name__ == '__main__':
+    # Запускаем Flask в отдельном потоке
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+
+    # Запускаем Telethon в главном asyncio цикле
+    asyncio.run(main())
