@@ -28,6 +28,7 @@ session_file_name = os.getenv('SESSION_FILE_NAME', 'session.session')
 
 channels = os.getenv('CHANNELS', '')
 channels_list = [ch.strip() for ch in channels.split(',') if ch.strip()]
+print(channels_list)
 session_local_path = session_file_name
 
 # === Загрузка .session из B2 (если нет локально) ===
