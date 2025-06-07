@@ -1,3 +1,4 @@
+import re
 from telethon import TelegramClient, events
 import asyncio
 import aiohttp
@@ -26,11 +27,7 @@ bucket_name = os.getenv('BUCKET_NAME')
 session_file_name = os.getenv('SESSION_FILE_NAME', 'session.session')
 
 channels = os.getenv('CHANNELS', '')
-keywords = os.getenv('KEYWORDS', '')
-
 channels_list = [ch.strip() for ch in channels.split(',') if ch.strip()]
-keywords_list = [kw.strip().lower() for kw in keywords.split(',') if kw.strip()]
-
 session_local_path = session_file_name
 
 # === Загрузка .session из приватного Backblaze B2 ===
@@ -69,13 +66,26 @@ else:
 # === Инициализация Telegram клиента ===
 client = TelegramClient(session_local_path, api_id, api_hash)
 
-# === Функция отправки сообщений в Telegram ===
+# === Функция проверки релевантности сообщения ===
+def is_relevant_message(text):
+    age_patterns = [
+        r'\b(?:3[0-9]|4[0-9]|50)[\s\-–~]{0,3}лет',         # "30-50 лет", "40-45лет"
+        r'\bвозраст\s*[—\-]?\s*(?:3[0-9]|4[0-9]|50)'       # "возраст — 45"
+    ]
+    male_keywords = ['мужчина', 'парень', 'мужская роль', 'типаж мужчины', 'герой-мужчина']
+    role_keywords = ['роль', 'играет', 'персонаж', 'герой']
+
+    text_lower = text.lower()
+    has_age = any(re.search(p, text_lower) for p in age_patterns)
+    has_male = any(kw in text_lower for kw in male_keywords)
+    has_role = any(kw in text_lower for kw in role_keywords)
+
+    return has_age and (has_male or has_role)
+
+# === Отправка сообщения в Telegram ===
 async def send_telegram_message(text):
     url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text
-    }
+    payload = {"chat_id": chat_id, "text": text}
     async with aiohttp.ClientSession() as session:
         async with session.post(url, json=payload) as resp:
             return await resp.json()
@@ -83,12 +93,15 @@ async def send_telegram_message(text):
 # === Обработчик новых сообщений ===
 @client.on(events.NewMessage(chats=channels_list))
 async def handler(event):
-    message = event.message.message.lower()
-    if any(keyword in message for keyword in keywords_list):
+    message = event.message.message
+    if is_relevant_message(message):
         chat_title = event.chat.title if event.chat else 'Без имени'
-        info = f"Нашёл кастинг: {chat_title} - {event.message.message}"
+        short_message = message[:500] + ('...' if len(message) > 500 else '')
+        info = f"Нашёл кастинг: {chat_title}\n{short_message}"
         print(info)
         await send_telegram_message(info)
+    else:
+        print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
 
 # === Запуск бота в отдельном потоке ===
 def start_bot():
@@ -99,6 +112,7 @@ def start_bot():
 
     asyncio.run(main())
 
+# === Стартуем ===
 if __name__ == '__main__':
     Thread(target=start_bot).start()
     port = int(os.getenv('PORT', 5000))
