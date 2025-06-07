@@ -103,9 +103,28 @@ async def handler(event):
     else:
         print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
 
+# === Проверка подписок пользователя сессии ===
+async def check_user_subscriptions():
+    print("\n🔎 Проверяем реальные подписки пользователя сессии...")
+    dialogs = await client.get_dialogs()
+    channels_user_is_in = []
+    for dialog in dialogs:
+        if dialog.is_channel:
+            username = getattr(dialog.entity, 'username', None)
+            if username:
+                channels_user_is_in.append(username)
+    print(f"Каналы в подписках пользователя: {channels_user_is_in}\n")
+
+    print("Сравнение с твоим списком каналов:")
+    for ch in channels_list:
+        if ch in channels_user_is_in:
+            print(f"✅ {ch} — подписка есть")
+        else:
+            print(f"❌ {ch} — подписки НЕТ")
+
 # === Проверка подключения к каналам ===
 async def check_channels():
-    print("🔍 Проверка подключения к каналам...")
+    print("\n🔍 Проверка подключения к каналам (get_entity)...")
     for ch in channels_list:
         try:
             entity = await client.get_entity(ch)
@@ -123,7 +142,8 @@ def run_flask():
 async def main():
     await client.start(phone=phone)
     print("Бот запущен и слушает сообщения...")
-    await check_channels()
+    await check_user_subscriptions()  # Проверяем подписки
+    await check_channels()            # Проверяем подключение через get_entity
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
