@@ -1,7 +1,6 @@
 import re
 import os
 import requests
-import aiohttp
 import asyncio
 from threading import Thread
 from flask import Flask
@@ -84,11 +83,7 @@ def is_relevant_message(text):
 
 # === Отправка сообщения в Telegram ===
 async def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            return await resp.json()
+    await client.send_message(chat_id, text)
 
 # === Обработчик новых сообщений ===
 @client.on(events.NewMessage(chats=channels_list))
