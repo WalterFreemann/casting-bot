@@ -21,6 +21,8 @@ phone = os.getenv('PHONE')
 bot_token = os.getenv('BOT_TOKEN')
 chat_id = int(os.getenv('CHAT_ID'))
 
+openai_api_key = os.getenv('OPENAI_API_KEY')
+
 b2_key_id = os.getenv('B2_KEY_ID')
 b2_app_key = os.getenv('B2_APPLICATION_KEY')
 bucket_name = os.getenv('BUCKET_NAME')
@@ -63,11 +65,10 @@ else:
 # === Инициализация Telegram клиента ===
 client = TelegramClient(session_local_path, api_id, api_hash)
 
-# === Проверка релевантности сообщения ===
+# === Проверка релевантности сообщения локально ===
 def is_relevant_message(text):
     text = text.lower()
 
-    # Фильтр по возрасту
     age_match = re.search(r'(?:возраст[\s:–\-]*)?(?:от)?\s*(\d{2})[\s\-–~]{0,3}(?:до)?\s*(\d{2})?\s*лет', text)
     if age_match:
         age_start = int(age_match.group(1))
@@ -77,16 +78,48 @@ def is_relevant_message(text):
     else:
         return False
 
-    # Фильтр по полу
     if 'женщин' in text or 'девушк' in text:
         return False
 
-    # Наличие роли
     role_keywords = ['роль', 'играет', 'персонаж', 'герой', 'типаж']
     if not any(kw in text for kw in role_keywords):
         return False
 
     return True
+
+# === GPT-фильтрация ===
+async def is_relevant_by_gpt(text):
+    prompt = f"""
+Ты фильтр кастингов. Твоя задача — решить, подходит ли кастинг мужчине 43 лет.
+Сообщение ниже — это текст кастинга из Telegram.
+
+Только два варианта:
+- Если кастинг подходит, ответь строго: `YES`
+- Если кастинг точно не подходит — `NO`
+- Если не уверен — `MAYBE`
+
+Кастинг:
+{text}
+    """
+    headers = {
+        "Authorization": f"Bearer {openai_api_key}",
+        "Content-Type": "application/json"
+    }
+    json_data = {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 10
+    }
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                reply = data["choices"][0]["message"]["content"].strip().upper()
+                return reply in ("YES", "MAYBE")
+            else:
+                print(f"GPT-фильтр: ошибка {resp.status}")
+                return False
 
 # === Пересылка сообщения пользователю ===
 async def forward_message(event):
@@ -103,7 +136,12 @@ async def handler(event):
     if is_relevant_message(msg_text):
         await forward_message(event)
     else:
-        print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
+        # Сомнительное — пробуем через GPT
+        if await is_relevant_by_gpt(msg_text):
+            print(f"🤖 GPT решил переслать сообщение из {event.chat.title if event.chat else 'без имени'}")
+            await forward_message(event)
+        else:
+            print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
 
 # === Проверка подписок пользователя сессии ===
 async def check_user_subscriptions():
