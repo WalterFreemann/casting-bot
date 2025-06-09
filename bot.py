@@ -19,7 +19,7 @@ api_id = int(os.getenv('API_ID'))
 api_hash = os.getenv('API_HASH')
 phone = os.getenv('PHONE')
 bot_token = os.getenv('BOT_TOKEN')
-chat_id = os.getenv('CHAT_ID')
+chat_id = int(os.getenv('CHAT_ID'))
 
 b2_key_id = os.getenv('B2_KEY_ID')
 b2_app_key = os.getenv('B2_APPLICATION_KEY')
@@ -28,18 +28,15 @@ session_file_name = os.getenv('SESSION_FILE_NAME', 'session.session')
 
 channels = os.getenv('CHANNELS', '')
 channels_list = [ch.strip() for ch in channels.split(',') if ch.strip()]
-print(channels_list)
 session_local_path = session_file_name
 
 # === Загрузка .session из B2 (если нет локально) ===
 def download_session_from_b2():
     print("Сессионный файл не найден локально. Пытаемся скачать из B2...")
-
     auth = requests.get(
         "https://api.backblazeb2.com/b2api/v2/b2_authorize_account",
         auth=(b2_key_id, b2_app_key)
     )
-
     if auth.status_code != 200:
         raise RuntimeError(f"Ошибка авторизации B2: {auth.status_code} - {auth.text}")
 
@@ -68,38 +65,43 @@ client = TelegramClient(session_local_path, api_id, api_hash)
 
 # === Проверка релевантности сообщения ===
 def is_relevant_message(text):
-    age_patterns = [
-        r'\b(?:3[0-9]|4[0-9]|50)[\s\-–~]{0,3}лет',
-        r'\bвозраст\s*[—\-]?\s*(?:3[0-9]|4[0-9]|50)'
-    ]
-    male_keywords = ['мужчина', 'парень', 'мужская роль', 'типаж мужчины', 'герой-мужчина']
-    role_keywords = ['роль', 'играет', 'персонаж', 'герой']
+    text = text.lower()
 
-    text_lower = text.lower()
-    has_age = any(re.search(p, text_lower) for p in age_patterns)
-    has_male = any(kw in text_lower for kw in male_keywords)
-    has_role = any(kw in text_lower for kw in role_keywords)
+    # Фильтр по возрасту
+    age_match = re.search(r'(?:возраст[\s:–\-]*)?(?:от)?\s*(\d{2})[\s\-–~]{0,3}(?:до)?\s*(\d{2})?\s*лет', text)
+    if age_match:
+        age_start = int(age_match.group(1))
+        age_end = int(age_match.group(2)) if age_match.group(2) else age_start
+        if age_end < 30 or age_start > 50:
+            return False
+    else:
+        return False
 
-    return has_age and (has_male or has_role)
+    # Фильтр по полу
+    if 'женщин' in text or 'девушк' in text:
+        return False
 
-# === Отправка сообщения в Telegram ===
-async def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    payload = {"chat_id": chat_id, "text": text}
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload) as resp:
-            return await resp.json()
+    # Наличие роли
+    role_keywords = ['роль', 'играет', 'персонаж', 'герой', 'типаж']
+    if not any(kw in text for kw in role_keywords):
+        return False
+
+    return True
+
+# === Пересылка сообщения пользователю ===
+async def forward_message(event):
+    try:
+        await client.forward_messages(chat_id, event.message)
+        print(f"✅ Переслал сообщение из {event.chat.title if event.chat else 'неизвестного канала'}")
+    except Exception as e:
+        print(f"❌ Ошибка при пересылке: {e}")
 
 # === Обработчик новых сообщений ===
 @client.on(events.NewMessage(chats=channels_list))
 async def handler(event):
-    message = event.message.message
-    if is_relevant_message(message):
-        chat_title = event.chat.title if event.chat else 'Без имени'
-        short_message = message[:500] + ('...' if len(message) > 500 else '')
-        info = f"Нашёл кастинг: {chat_title}\n{short_message}"
-        print(info)
-        await send_telegram_message(info)
+    msg_text = event.message.message or ''
+    if is_relevant_message(msg_text):
+        await forward_message(event)
     else:
         print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
 
@@ -142,14 +144,11 @@ def run_flask():
 async def main():
     await client.start(phone=phone)
     print("Бот запущен и слушает сообщения...")
-    await check_user_subscriptions()  # Проверяем подписки
-    await check_channels()            # Проверяем подключение через get_entity
+    await check_user_subscriptions()
+    await check_channels()
     await client.run_until_disconnected()
 
 if __name__ == '__main__':
-    # Запускаем Flask в отдельном потоке
     flask_thread = Thread(target=run_flask)
     flask_thread.start()
-
-    # Запускаем Telethon в главном asyncio цикле
     asyncio.run(main())
