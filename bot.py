@@ -93,10 +93,15 @@ async def is_relevant_by_gpt(text):
 Ты фильтр кастингов. Твоя задача — решить, подходит ли кастинг мужчине 43 лет.
 Сообщение ниже — это текст кастинга из Telegram.
 
-Только два варианта:
-- Если кастинг подходит, ответь строго: `YES`
-- Если кастинг точно не подходит — `NO`
-- Если не уверен — `MAYBE`
+Ты должен ответить в формате:
+YES: (объяснение, почему подходит)
+NO: (объяснение, почему не подходит)
+MAYBE: (если нет полной уверенности)
+
+Примеры:
+YES: ищут мужчину 40–50 лет на роль полицейского.
+NO: ищут женщину 20–30 лет на фотосъёмку.
+MAYBE: возраст не указан, но есть фраза "ищем мужчину".
 
 Кастинг:
 {text}
@@ -109,14 +114,19 @@ async def is_relevant_by_gpt(text):
         "model": "gpt-4o",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.2,
-        "max_tokens": 10
+        "max_tokens": 100
     }
     async with aiohttp.ClientSession() as session:
         async with session.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                reply = data["choices"][0]["message"]["content"].strip().upper()
-                return reply in ("YES", "MAYBE")
+                reply = data["choices"][0]["message"]["content"].strip()
+                print(f"GPT: {reply}")  # теперь видно, как GPT аргументирует
+
+                if reply.upper().startswith("YES") or reply.upper().startswith("MAYBE"):
+                    return True
+                else:
+                    return False
             else:
                 print(f"GPT-фильтр: ошибка {resp.status}")
                 return False
