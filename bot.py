@@ -88,10 +88,8 @@ def is_relevant_message(text):
     return True
 
 # === GPT-фильтрация ===
-async def is_relevant_by_gpt(text):
-    import openai
-    openai.api_key = openai_api_key
 
+    async def is_relevant_by_gpt(text):
     prompt = f"""
 Ты — эксперт-аналитик по кастингам с огромным опытом, который не просто читает объявления, а буквально вчитывается в каждое слово, чтобы понять, подходит ли мужчина 43 лет для участия.
 
@@ -149,52 +147,104 @@ MAYBE: Нет указания возраста, упоминается «раб
 ### ОТВЕТ:
 """
 
-    try:
-        response = await openai.ChatCompletion.acreate(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "Ты эксперт по кастингам для мужчин 40+."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0,
-            top_p=1,
-            frequency_penalty=0,
-            presence_penalty=0,
-        )
-        answer = response.choices[0].message.content.strip()
-        return answer
-    except Exception as e:
-        print(f"OpenAI API error: {e}")
-        return "MAYBE: Ошибка при анализе с GPT."
+    headers = {
+        "Authorization": f"Bearer {openai_api_key}",
+        "Content-Type": "application/json"
+    }
 
-# === Обработчик новых сообщений в Telegram ===
+    json_data = {
+        "model": "gpt-4o",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.2,
+        "max_tokens": 200
+    }
+
+    async with aiohttp.ClientSession() as session:
+        async with session.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data) as resp:
+            if resp.status == 200:
+                data = await resp.json()
+                reply = data["choices"][0]["message"]["content"].strip()
+                print(f"GPT: {reply}")
+
+                # Можно ориентироваться по началу
+                if reply.upper().startswith("YES"):
+                    return True
+                elif reply.upper().startswith("NO"):
+                    return False
+                elif reply.upper().startswith("MAYBE"):
+                    return True  # по желанию можно вернуть False, если хочешь более жёсткий фильтр
+                else:
+                    return False
+            else:
+                print(f"GPT фильтр: ошибка {resp.status}")
+                return False
+
+# === Пересылка сообщения пользователю ===
+async def forward_message(event):
+    try:
+        await client.forward_messages(chat_id, event.message)
+        print(f"✅ Переслал сообщение из {event.chat.title if event.chat else 'неизвестного канала'}")
+    except Exception as e:
+        print(f"❌ Ошибка при пересылке: {e}")
+
+# === Обработчик новых сообщений ===
 @client.on(events.NewMessage(chats=channels_list))
 async def handler(event):
-    text = event.message.message
-    if not text:
-        return
+    msg_text = event.message.message or ''
+    if is_relevant_message(msg_text):
+        await forward_message(event)
+    else:
+        # Сомнительное — пробуем через GPT
+        if await is_relevant_by_gpt(msg_text):
+            print(f"🤖 GPT решил переслать сообщение из {event.chat.title if event.chat else 'без имени'}")
+            await forward_message(event)
+        else:
+            print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
 
-    # Локальная фильтрация
-    if not is_relevant_message(text):
-        return
+# === Проверка подписок пользователя сессии ===
+async def check_user_subscriptions():
+    print("\n🔎 Проверяем реальные подписки пользователя сессии...")
+    dialogs = await client.get_dialogs()
+    channels_user_is_in = []
+    for dialog in dialogs:
+        if dialog.is_channel:
+            username = getattr(dialog.entity, 'username', None)
+            if username:
+                channels_user_is_in.append(username)
+    print(f"Каналы в подписках пользователя: {channels_user_is_in}\n")
 
-    # GPT-фильтрация
-    result = await is_relevant_by_gpt(text)
-    print(f"GPT фильтр вернул:\n{result}\n")
+    print("Сравнение с твоим списком каналов:")
+    for ch in channels_list:
+        if ch in channels_user_is_in:
+            print(f"✅ {ch} — подписка есть")
+        else:
+            print(f"❌ {ch} — подписки НЕТ")
 
-    # По желанию — отправить в телегу или куда надо
-    if result.startswith("YES"):
-        await client.send_message(chat_id, f"Подходит кастинг:\n\n{text}\n\nРешение:\n{result}")
+# === Проверка подключения к каналам ===
+async def check_channels():
+    print("\n🔍 Проверка подключения к каналам (get_entity)...")
+    for ch in channels_list:
+        try:
+            entity = await client.get_entity(ch)
+            title = getattr(entity, 'title', 'Без названия')
+            print(f"✅ Подключен к: {ch} — {title}")
+        except Exception as e:
+            print(f"❌ Ошибка при подключении к {ch}: {e}")
 
+# === Функция для запуска Flask в отдельном потоке ===
 def run_flask():
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.getenv('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)
 
-def run_telegram():
-    client.start()
-    print("Telegram client запущен.")
-    client.run_until_disconnected()
+# === Основная async функция запуска бота ===
+async def main():
+    await client.start(phone=phone)
+    print("Бот запущен и слушает сообщения...")
+    await check_user_subscriptions()
+    await check_channels()
+    await client.run_until_disconnected()
 
-if __name__ == "__main__":
-    Thread(target=run_flask).start()
-    run_telegram()
+if __name__ == '__main__':
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+    asyncio.run(main())
