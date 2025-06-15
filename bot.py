@@ -32,6 +32,22 @@ channels = os.getenv('CHANNELS', '')
 channels_list = [ch.strip() for ch in channels.split(',') if ch.strip()]
 session_local_path = session_file_name
 
+required_vars = {
+    "API_ID": api_id,
+    "API_HASH": api_hash,
+    "PHONE": phone,
+    "BOT_TOKEN": bot_token,
+    "CHAT_ID": chat_id,
+    "OPENAI_API_KEY": openai_api_key,
+    "B2_KEY_ID": b2_key_id,
+    "B2_APPLICATION_KEY": b2_app_key,
+    "BUCKET_NAME": bucket_name
+}
+
+for var_name, var_value in required_vars.items():
+    if not var_value:
+        raise RuntimeError(f"ОШИБКА: Переменная окружения '{var_name}' не задана!")
+
 # === Загрузка .session из B2 (если нет локально) ===
 def download_session_from_b2():
     print("Сессионный файл не найден локально. Пытаемся скачать из B2...")
@@ -69,41 +85,58 @@ client = TelegramClient(session_local_path, api_id, api_hash)
 def is_relevant_message(text):
     text = text.lower()
 
-    age_match = re.search(r'(?:возраст[\s:–\-]*)?(?:от)?\s*(\d{2})[\s\-–~]{0,3}(?:до)?\s*(\d{2})?\s*лет', text)
-    if age_match:
-        age_start = int(age_match.group(1))
-        age_end = int(age_match.group(2)) if age_match.group(2) else age_start
-        if age_end < 30 or age_start > 50:
-            return False
-    else:
-        return False
-
+    # Отсекаем женские кастинги
     if 'женщин' in text or 'девушк' in text:
         return False
 
-    role_keywords = ['роль', 'играет', 'персонаж', 'герой', 'типаж']
+    # Проверка ключевых слов
+    role_keywords = [
+        'роль', 'играет', 'персонаж', 'герой', 'типаж', 'проба', 'в кастинг', 'на кастинг',
+        'снимается', 'ищем актера', 'ищем артиста', 'сценарий', 'эпизод', 'героиня', 'актёр',
+        'второстепенная роль', 'главная роль', 'камео', 'появляется в кадре', 'игровая роль',
+        'роль без слов', 'диалог', 'актёр на съёмку', 'мужской образ', 'второй план'
+    ]
     if not any(kw in text for kw in role_keywords):
         return False
 
+    # Фильтр по возрасту (более гибкий и защищённый)
+    age_match = re.search(r'(?:возраст[\s:–\-]*)?(?:от)?\s*(\d{2})[\s\-–~]{0,3}(?:до)?\s*(\d{2})?\s*лет', text)
+    if age_match:
+        try:
+            age_start = int(age_match.group(1))
+            age_end = int(age_match.group(2)) if age_match.group(2) else age_start
+            if age_end < 30 or age_start > 50:
+                return False
+        except ValueError:
+            pass  # если парсинг не удался — пропускаем фильтр
+
     return True
+
+
 
 # === GPT-фильтрация ===
 
 async def is_relevant_by_gpt(text):
     prompt = f"""
-Ты — эксперт-аналитик по кастингам с огромным опытом, который не просто читает объявления, а буквально вчитывается в каждое слово, чтобы понять, подходит ли мужчина 43 лет для участия.
+Ты — эксперт-аналитик по кастингам с огромным опытом, который не просто читает объявления,
+а буквально вчитывается в каждое слово, чтобы понять, подходит ли мужчина 43 лет для участия.
 
-Задача: оценить, подходит ли кастинг по профессии для мужчины 43 лет, который ищет серьёзную работу в кино, рекламе, озвучке, короткометражках и эпизодах, включая проекты с оплатой и без, но с творческим смыслом.
+Задача: оценить, стоит ли мужчине 43 лет откликаться на этот кастинг. Важно не просто формальное соответствие,
+а реальный профессиональный смысл участия актёру, который ищет серьёзную работу в кино, рекламе, озвучке, короткометражках и эпизодах,
+включая проекты с оплатой и без, но с творческим смыслом.
 
 ---
 
 ### ВАЖНО — ТРЁХСТУПЕНЧАТЫЙ ФИЛЬТР
 
-1. **Отсеивать массовки, групповые сцены (АМС), тусовочные мероприятия, семинары, кастинги для ассистентов режиссёра или технического персонала.** Это для того, чтобы пользователь не терял время на неактуальные объявления.
+1. **Отсеивать массовки, групповые сцены (АМС), тусовочные мероприятия, семинары, кастинги для ассистентов режиссёра или технического персонала.**
+Это для того, чтобы пользователь не терял время на неактуальные объявления.
 
-2. **Фокусироваться на возрасте 30-50 лет (особенно 40+), пол — мужчина, с возможным расширением, если указано «любой пол» или «мужчина/женщина».**
+2. **Фокусироваться на возрасте 30-50 лет (особенно 40+), пол — мужчина, с возможным расширением,
+если пол не ограничен («любой пол», «м/ж» и т.п.)**
 
-3. **Учитывать формат и характер проекта — кино, реклама, озвучка, короткометражки, серьёзные эпизоды. Оценивать качество предложения: оплачиваемый, перспективный, творчески интересный.**
+3. **Учитывать формат и характер проекта — кино, реклама, озвучка, короткометражки, серьёзные эпизоды.
+Оценивать качество предложения: оплачиваемый, перспективный, творчески интересный.**
 
 ---
 
@@ -163,21 +196,26 @@ MAYBE: Нет указания возраста, упоминается «раб
         async with session.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data) as resp:
             if resp.status == 200:
                 data = await resp.json()
-                reply = data["choices"][0]["message"]["content"].strip()
-                print(f"GPT: {reply}")
-
-                # Можно ориентироваться по началу
-                if reply.upper().startswith("YES"):
-                    return True
-                elif reply.upper().startswith("NO"):
+                try:
+                    reply = data["choices"][0]["message"]["content"].strip()
+                    print(f"GPT ответ: {reply}")
+                except (KeyError, IndexError):
+                    print("GPT фильтр: неожиданный формат ответа")
                     return False
-                elif reply.upper().startswith("MAYBE"):
-                    return True  # по желанию можно вернуть False, если хочешь более жёсткий фильтр
+
+                if reply.lower().startswith("yes"):
+                    return True
+                elif reply.lower().startswith("no"):
+                    return False
+                elif reply.lower().startswith("maybe"):
+                    return True
                 else:
+                    print(f"GPT фильтр: непонятный ответ: {reply}")
                     return False
             else:
-                print(f"GPT фильтр: ошибка {resp.status}")
+                print(f"GPT фильтр: ошибка HTTP {resp.status}")
                 return False
+
 
 # === Пересылка сообщения пользователю ===
 async def forward_message(event):
