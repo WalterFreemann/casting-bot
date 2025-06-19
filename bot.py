@@ -21,8 +21,6 @@ phone = os.getenv('PHONE')
 bot_token = os.getenv('BOT_TOKEN')
 chat_id = int(os.getenv('CHAT_ID'))
 
-openai_api_key = os.getenv('OPENAI_API_KEY')
-
 b2_key_id = os.getenv('B2_KEY_ID')
 b2_app_key = os.getenv('B2_APPLICATION_KEY')
 bucket_name = os.getenv('BUCKET_NAME')
@@ -38,7 +36,6 @@ required_vars = {
     "PHONE": phone,
     "BOT_TOKEN": bot_token,
     "CHAT_ID": chat_id,
-    "OPENAI_API_KEY": openai_api_key,
     "B2_KEY_ID": b2_key_id,
     "B2_APPLICATION_KEY": b2_app_key,
     "BUCKET_NAME": bucket_name
@@ -112,75 +109,8 @@ def is_relevant_message(text):
 
     return True
 
-
-
-# === GPT-фильтрация ===
-
-async def is_relevant_by_gpt(text):
-    prompt = f"""
-Ты — эксперт-аналитик кастингов. Задача — оценить, стоит ли мужчине 43 лет откликаться на этот кастинг. Важно не просто формальное соответствие,
-а реальный профессиональный смысл участия актёру, который ищет серьёзную работу в кино, рекламе, озвучке, короткометражках и эпизодах,
-включая проекты с оплатой и без, но с творческим смыслом.
-
-Фильтрация:
-1. Убираем массовки, ассистентов, тусовки, тех. персонал.
-2. Интересуют мужчины 30–50 лет, особенно 40+.
-3. Цель — роли в кино, рекламе, озвучке, короткометражках, особенно оплачиваемые или творчески интересные.
-
-Учитывай:
-- Возраст/пол
-- Тип проекта
-- Тональность
-- Условия (оплата, обмен опытом и т.д.)
-- Массовка или нет
-
-Формат ответа (начало строки):
-YES: ...  
-NO: ...  
-MAYBE: ...
-
-Текст объявления:
-{text}
-"""
-
-    headers = {
-        "Authorization": f"Bearer {openai_api_key}",
-        "Content-Type": "application/json"
-    }
-
-    json_data = {
-        "model": "gpt-4o",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-        "max_tokens": 200
-    }
-
-    async with aiohttp.ClientSession() as session:
-        async with session.post("https://api.openai.com/v1/chat/completions", headers=headers, json=json_data) as resp:
-            if resp.status == 200:
-                data = await resp.json()
-                try:
-                    reply = data["choices"][0]["message"]["content"].strip()
-                    print(f"GPT ответ: {reply}")
-                except (KeyError, IndexError):
-                    print("GPT фильтр: неожиданный формат ответа")
-                    return False
-
-                if reply.lower().startswith("yes"):
-                    return True
-                elif reply.lower().startswith("no"):
-                    return False
-                elif reply.lower().startswith("maybe"):
-                    return True
-                else:
-                    print(f"GPT фильтр: непонятный ответ: {reply}")
-                    return False
-            else:
-                print(f"GPT фильтр: ошибка HTTP {resp.status}")
-                return False
-
 # === Пересылка или копирование сообщения пользователю ===
-async def forward_message(event, already_passed_gpt=False):
+async def forward_message(event):
     try:
         await client.forward_messages(chat_id, event.message)
         print(f"✅ Переслал сообщение из {event.chat.title if event.chat else 'неизвестного канала'}")
@@ -192,12 +122,7 @@ async def forward_message(event, already_passed_gpt=False):
 
         if text:
             print(f"📄 Копирую текст вручную: {text[:50]}...")
-
-            # 💡 Только если не проверяли GPT раньше
-            if already_passed_gpt or await is_relevant_by_gpt(text):
-                await client.send_message(chat_id, f"📌 Кастинг подходит:\n\n{text}")
-            else:
-                print("🚫 Кастинг не прошёл фильтр GPT")
+            await client.send_message(chat_id, f"📌 Кастинг подходит:\n\n{text}")
         else:
             print("❌ Нет текста для анализа (ни text, ни caption)")
 
@@ -208,12 +133,7 @@ async def handler(event):
     if is_relevant_message(msg_text):
         await forward_message(event)
     else:
-        # GPT уже проверяет, и если да — передаём флаг
-        if await is_relevant_by_gpt(msg_text):
-            print(f"🤖 GPT решил переслать сообщение из {event.chat.title if event.chat else 'без имени'}")
-            await forward_message(event, already_passed_gpt=True)
-        else:
-            print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
+        print(f"[Пропущено] {event.chat.title if event.chat else 'Без имени'}")
 
 # === Проверка подписок пользователя сессии ===
 async def check_user_subscriptions():
