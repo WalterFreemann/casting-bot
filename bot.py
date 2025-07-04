@@ -80,32 +80,52 @@ client = TelegramClient(session_local_path, api_id, api_hash)
 
 # === Проверка релевантности сообщения локально ===
 def is_relevant_message(text):
+    import re
     text = text.lower()
 
-    # Отсекаем женские кастинги
-    if 'женщин' in text or 'девушк' in text:
-        return False
-
-    # Проверка ключевых слов
-    role_keywords = [
-        'роль', 'играет', 'персонаж', 'герой', 'типаж', 'проба', 'в кастинг', 'на кастинг',
-        'снимается', 'ищем актера', 'ищем артиста', 'сценарий', 'эпизод', 'героиня', 'актёр',
-        'второстепенная роль', 'главная роль', 'камео', 'появляется в кадре', 'игровая роль',
-        'роль без слов', 'диалог', 'актёр на съёмку', 'мужской образ', 'второй план'
+    # === Этап 1. Явно нерелевантное — не кастинг ===
+    non_casting_keywords = [
+        'мероприятие', 'фуршет', 'презентация', 'зрители', 'официанты', 'гости',
+        'в клубе', 'приглашенные', 'офисные сотрудники', 'для массовки', 'публика',
+        'диджей', 'ведущий', 'аниматор', 'модель', 'модели', 'статисты', 'набор в студию'
     ]
-    if not any(kw in text for kw in role_keywords):
+    if any(word in text for word in non_casting_keywords):
         return False
 
-    # Фильтр по возрасту (более гибкий и защищённый)
-    age_match = re.search(r'(?:возраст[\s:–\-]*)?(?:от)?\s*(\d{2})[\s\-–~]{0,3}(?:до)?\s*(\d{2})?\s*лет', text)
-    if age_match:
-        try:
-            age_start = int(age_match.group(1))
-            age_end = int(age_match.group(2)) if age_match.group(2) else age_start
-            if age_end < 30 or age_start > 50:
-                return False
-        except ValueError:
-            pass  # если парсинг не удался — пропускаем фильтр
+    # === Этап 2. Женские кастинги ===
+    if ('женщин' in text or 'девушк' in text or 'актрис' in text) and not any(m in text for m in ['мужчин', 'мужск', 'мужчина', 'актёр', 'актер']):
+        return False
+
+    # === Этап 3. Слишком низкий гонорар за массовку/эпизод без слов ===
+    low_paid_roles = ['массовк', 'группов', 'эпизод без слов', 'врачи', 'санитары', 'проходящ', 'официант', 'прохож']
+    pay_match = re.search(r'(\d{3,6})\s*(₽|руб|руб\.|р\b)', text)
+    if pay_match:
+        amount = int(pay_match.group(1))
+        if amount < 5000 and any(word in text for word in low_paid_roles):
+            return False
+
+    # === Этап 4. Возрастной фильтр (примерно 25–55 лет) ===
+    age_match = re.findall(r'(\d{2})\s*[-–~]?\s*(\d{2})?\s*лет', text)
+    for match in age_match:
+        start = int(match[0])
+        end = int(match[1]) if match[1] else start
+        if end < 25 or start > 55:
+            return False
+
+    # === Этап 5. Жёсткая этника (исключаем если только один типаж и он не твой) ===
+    hard_ethnic = ['восточная внешность', 'узбек', 'таджик', 'кавказская внешность', 'негроид', 'афро']
+    if any(e in text for e in hard_ethnic):
+        # если НЕТ слов типа "русский", "славянский", "европейский", "мужчина", то отбрасываем
+        if not any(w in text for w in ['славян', 'русск', 'европе', 'мужчина', 'актёр', 'актер']):
+            return False
+
+    # === Этап 6. Проверка на признаки годного кастинга ===
+    must_have_keywords = [
+        'роль', 'персонаж', 'проба', 'кастинг', 'съёмк', 'эпизод', 'типаж', 'самопроба',
+        'в кадре', 'актёр', 'актер', 'на роль', 'играет', 'утверждение', 'пробы'
+    ]
+    if not any(k in text for k in must_have_keywords):
+        return False
 
     return True
 
