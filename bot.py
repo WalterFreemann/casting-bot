@@ -140,6 +140,13 @@ def is_relevant_message(text):
     if not any(k in text for k in must_have_keywords):
         return False
 
+    # === Этап 7. География: если НЕ Петербург, то нужен высокий гонорар ===
+    is_spb = any(city in text for city in ['спб', 'питер', 'санкт-петербург'])
+    if not is_spb and pay_match:
+        amount = int(pay_match.group(1))
+        if amount < 50000:
+            return False
+
     return True
 
 # === Пересылка или копирование сообщения пользователю ===
